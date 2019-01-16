@@ -37,21 +37,20 @@ func (n *node) sum() int {
 }
 
 func (n *node) value() int {
+	val := 0
 	if len(n.children) == 0 {
-		val := 0
 		for _, m := range n.metadata {
 			val += m
 		}
-		return val
-	} else {
-		val := 0
+	}
+	else {
 		for _, m := range n.metadata {
 			if m > 0 && m <= len(n.children) {
 				val += n.children[m-1].value()
 			}
 		}
-		return val
 	}
+	return val
 }
 
 func main() {
