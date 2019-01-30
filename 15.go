@@ -293,11 +293,76 @@ func (c *combat) solve1() {
 	fmt.Println("Outcome:", i, "*", sum, "=", i*sum)
 }
 
+func copyRaw(src [][]byte) [][]byte {
+	cp := make([][]byte, len(src))
+	for i, _ := range src {
+		cp[i] = make([]byte, len(src[i]))
+		copy(cp[i], src[i])
+	}
+	return cp
+}
+
+func copyUnits(src []*unit, elfPower int) []*unit {
+	cp := make([]*unit, len(src))
+	for i, u := range src {
+		var power int
+		switch u.kind {
+		case ELF:
+			power = elfPower
+		case GOBLIN:
+			power = u.power
+		default:
+			panic("unknown unit kind!")
+		}
+		cp[i] = &unit{u.kind, loc{u.l.x, u.l.y}, u.hp, power, u.dead}
+	}
+	return cp
+}
+
+func (c *combat) solve2() {
+	backupRaw := copyRaw(c.raw)
+	backupUnits := copyUnits(c.units, c.units[0].power)
+
+Outer:
+	for i := 4; ; i++ {
+		fmt.Println("Elf attack power at", i)
+		c.raw = copyRaw(backupRaw)
+		c.units = copyUnits(backupUnits, i)
+
+		var j int
+		for j = 0; c.moveAll(); j++ {
+			for _, u := range c.units {
+				if u.dead && u.kind == ELF {
+					continue Outer
+				}
+			}
+		}
+		for k, u := range c.units {
+			if u.dead && u.kind == ELF {
+				break
+			}
+			if k == len(c.units)-1 {
+				fmt.Println("Battle ended after", j, "rounds")
+				c.print()
+				sum := 0
+				for _, u := range c.units {
+					if !u.dead {
+						sum += u.hp
+					}
+				}
+				fmt.Println("Outcome:", j, "*", sum, "=", j*sum)
+				break Outer
+			}
+		}
+	}
+}
+
 func main() {
 	c := combat{}
 
 	c.read()
 	c.print()
 
-	c.solve1()
+	//c.solve1()
+	c.solve2()
 }
