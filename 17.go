@@ -3,22 +3,24 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
 )
 
-type loc struct {
+type pair struct {
 	x int
 	y int
 }
 
 type scan struct {
-	x      []*int // [xmin, xmax, stream1x, stream2x,...]
-	y      []*int // [ymin, ymax, stream1y, stream2y,...]
-	clay   map[loc]bool
-	stream map[loc]bool
-	water  map[loc]bool
+	min     pair // min x, y
+	max     pair // max x, y
+	streams []pair
+	clay    map[pair]bool
+	running map[pair]bool // water flow from stream origin downward
+	still   map[pair]bool // water that has collected in clay pockets and come to rest
 }
 
 func parse(s string) int {
@@ -58,22 +60,22 @@ func (s *scan) read() {
 			panic(fmt.Sprintf("malformed: %s", line))
 		}
 
-		if s.x[0] == nil || *s.x[0] > x1 {
-			s.x[0] = &x1
+		if s.min.x > x1 {
+			s.min.x = x1
 		}
-		if s.x[1] == nil || *s.x[1] < x2 {
-			s.x[1] = &x2
+		if s.max.x < x2 {
+			s.max.x = x2
 		}
-		if s.y[0] == nil || *s.y[0] > y1 {
-			s.y[0] = &y1
+		if s.min.y > y1 {
+			s.min.y = y1
 		}
-		if s.y[1] == nil || *s.y[1] < y2 {
-			s.y[1] = &y2
+		if s.max.y < y2 {
+			s.max.y = y2
 		}
 
 		for y := y1; y <= y2; y++ {
 			for x := x1; x <= x2; x++ {
-				s.clay[loc{x, y}] = true
+				s.clay[pair{x, y}] = true
 			}
 		}
 	}
@@ -83,45 +85,45 @@ func (s *scan) read() {
 }
 
 func (s *scan) print() {
-	for y := *s.y[0]; y <= *s.y[1]; y++ {
-		for x := *s.x[0]; x <= *s.x[1]; x++ {
-			if y == *s.y[0] && x == *s.x[0] {
+	for y := s.min.y; y <= s.max.y; y++ {
+		for x := s.min.x; x <= s.max.x; x++ {
+			if y == s.min.y && x == s.min.x {
 				fmt.Println(x)
 			}
-			if _, ok := s.clay[loc{x, y}]; ok {
+			if _, ok := s.clay[pair{x, y}]; ok {
 				fmt.Printf("#")
 			} else {
-				if _, ok := s.water[loc{x, y}]; ok {
+				if _, ok := s.still[pair{x, y}]; ok {
 					fmt.Printf("~")
 				} else {
-					if _, ok := s.stream[loc{x, y}]; ok {
+					if _, ok := s.running[pair{x, y}]; ok {
 						fmt.Printf("|")
 					} else {
 						fmt.Printf(".")
 					}
 				}
 			}
-			if x == *s.x[1] && (y == *s.y[0] || y == *s.y[1]) {
+			if x == s.max.x && (y == s.min.y || y == s.max.y) {
 				fmt.Printf("  %d", y)
 			}
 		}
 		fmt.Println()
-		if y == *s.y[1] {
-			fmt.Println(*s.x[1])
+		if y == s.max.y {
+			fmt.Println(s.max.x)
 		}
 	}
 }
 
 func (s *scan) count() (int, int) {
 	total, atRest := 0, 0
-	for y := *s.y[0]; y <= *s.y[1]; y++ {
-		for x := *s.x[0]; x <= *s.x[1]; x++ {
-			if _, ok := s.clay[loc{x, y}]; !ok {
-				if _, ok := s.water[loc{x, y}]; ok {
+	for y := s.min.y; y <= s.max.y; y++ {
+		for x := s.min.x; x <= s.max.x; x++ {
+			if _, ok := s.clay[pair{x, y}]; !ok {
+				if _, ok := s.still[pair{x, y}]; ok {
 					total++
 					atRest++
 				} else {
-					if _, ok := s.stream[loc{x, y}]; ok {
+					if _, ok := s.running[pair{x, y}]; ok {
 						total++
 					}
 				}
@@ -132,29 +134,26 @@ func (s *scan) count() (int, int) {
 }
 
 func (s *scan) sand(x, y int) bool {
-	l := loc{x, y}
+	l := pair{x, y}
 	if _, ok := s.clay[l]; !ok {
-		if _, ok := s.water[l]; !ok {
+		if _, ok := s.still[l]; !ok {
 			return true
 		}
 	}
 	return false
 }
 
-func (s *scan) tick() bool {
-	if len(s.y) <= 2 {
-		return false
-	}
-	for i := 2; i < len(s.y); {
-		y, x := *s.y[i], *s.x[i]
-		if !s.sand(x, y) || y > *s.y[1] { // streams merge || stream overflows beyond bottom of scan
-			s.x[i], s.y[i] = s.x[len(s.x)-1], s.y[len(s.y)-1]
-			s.x, s.y = s.x[:len(s.x)-1], s.y[:len(s.y)-1]
+func (s *scan) tick() {
+	for i := 0; i < len(s.streams); {
+		x, y := s.streams[i].x, s.streams[i].y
+		if !s.sand(x, y) || y > s.max.y { // streams merge || stream overflows beyond bottom of scan
+			s.streams[i] = s.streams[len(s.streams)-1]
+			s.streams = s.streams[:len(s.streams)-1]
 			continue
 		}
 		if !s.sand(x, y+1) { // clay or water on bottom
 			var x1, x2 *int
-			for j := x - 1; j >= *s.x[0]; j-- {
+			for j := x - 1; j >= s.min.x; j-- {
 				if s.sand(j, y+1) {
 					break
 				} else if !s.sand(j, y) {
@@ -162,7 +161,7 @@ func (s *scan) tick() bool {
 					break
 				}
 			}
-			for j := x + 1; j <= *s.x[1]; j++ {
+			for j := x + 1; j <= s.max.x; j++ {
 				if s.sand(j, y+1) {
 					break
 				} else if !s.sand(j, y) {
@@ -172,7 +171,7 @@ func (s *scan) tick() bool {
 			}
 			if x1 != nil && x2 != nil {
 				for j := *x1; j <= *x2; j++ {
-					s.water[loc{j, y}] = true
+					s.still[pair{j, y}] = true
 				}
 				y -= 1
 			} else if x1 == nil && x2 != nil { // clay wall on right
@@ -181,7 +180,7 @@ func (s *scan) tick() bool {
 						x = j
 						break
 					}
-					s.stream[loc{j, y}] = true
+					s.running[pair{j, y}] = true
 				}
 			} else if x1 != nil && x2 == nil { // clay wall on left
 				for j := *x1 + 1; ; j++ {
@@ -189,7 +188,7 @@ func (s *scan) tick() bool {
 						x = j
 						break
 					}
-					s.stream[loc{j, y}] = true
+					s.running[pair{j, y}] = true
 				}
 			} else { // no walls on either side
 				for j := x; ; j-- {
@@ -197,48 +196,44 @@ func (s *scan) tick() bool {
 						x = j
 						break
 					}
-					s.stream[loc{j, y}] = true
+					s.running[pair{j, y}] = true
 				}
 				for j := x + 1; ; j++ {
 					if s.sand(j, y+1) {
-						s.x = append(s.x, &j)
-						s.y = append(s.y, &y)
+						s.streams = append(s.streams, pair{j, y})
 						break
 					}
-					s.stream[loc{j, y}] = true
+					s.running[pair{j, y}] = true
 				}
 			}
 		} else {
-			s.stream[loc{x, y}] = true
+			s.running[pair{x, y}] = true
 			y += 1
 		}
-		s.x[i], s.y[i] = &x, &y
-		if *s.x[0] > x {
-			s.x[0] = &x
+		s.streams[i].x, s.streams[i].y = x, y
+		if s.min.x > x {
+			s.min.x = x
 		}
-		if *s.x[1] < x {
-			s.x[1] = &x
+		if s.max.x < x {
+			s.max.x = x
 		}
 		i++
 	}
-	return true
 }
 
 func main() {
 	s := scan{
-		[]*int{nil, nil},
-		[]*int{nil, nil},
-		make(map[loc]bool),
-		make(map[loc]bool),
-		make(map[loc]bool),
+		pair{math.MaxInt16, math.MaxInt16},
+		pair{0, 0},
+		[]pair{pair{500, 0}},
+		make(map[pair]bool),
+		make(map[pair]bool),
+		make(map[pair]bool),
 	}
 	s.read()
-
-	spring := loc{500, 0}
-	s.x = []*int{s.x[0], s.x[1], &spring.x}
-	s.y = []*int{s.y[0], s.y[1], &spring.y}
-
-	for s.tick() {
+	s.print()
+	for len(s.streams) > 0 {
+		s.tick()
 	}
 	s.print()
 	fmt.Println(s.count())
