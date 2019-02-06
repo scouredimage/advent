@@ -231,7 +231,6 @@ func main() {
 		make(map[pair]bool),
 	}
 	s.read()
-	s.print()
 	for len(s.streams) > 0 {
 		s.tick()
 	}
